@@ -1,1 +1,5 @@
 test_videos/*
+__pycache__/
+venv/
+Anomaly-Videos-Part-4/*
+Normal_Videos_for_Event_Recognition/*
