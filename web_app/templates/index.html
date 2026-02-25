@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Antigravity Anomaly Detection</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Anomaly Detection System</h1>
+        <p class="subtitle">
+          Real-time Surveillance Analysis using Deep Learning
+        </p>
+      </header>
+
+      <div class="controls-section">
+        <button
+          id="btn-upload-mode"
+          class="mode-btn active"
+          onclick="setMode('upload')"
+        >
+          Upload Video
+        </button>
+        <button id="btn-live-mode" class="mode-btn" onclick="setMode('live')">
+          Live Camera
+        </button>
+      </div>
+
+      <main>
+        <!-- Upload Section -->
+        <section id="upload-section" class="upload-section">
+          <form action="/upload" method="post" enctype="multipart/form-data">
+            <div class="file-input-wrapper">
+              <input
+                type="file"
+                name="file"
+                id="file"
+                accept="video/*"
+                onchange="this.form.submit()"
+              />
+              <label for="file" class="btn">Select Video File</label>
+            </div>
+          </form>
+        </section>
+
+        <!-- Display Section -->
+        <section id="display-section" class="display-section">
+          <div id="alert-banner" class="alert-banner">
+            <strong>⚠️ ALERT:</strong>
+            <span id="alert-text">Abnormal activity detected!</span>
+          </div>
+
+          <!-- Uploaded Video View -->
+          <div
+            id="uploaded-view"
+            class="video-container {% if not filename %}hidden{% endif %}"
+          >
+            {% if filename %}
+            <h2>Analyzing: {{ filename }}</h2>
+            <img
+              id="uploaded-feed-img"
+              src="{{ url_for('video_feed', filename=filename) }}"
+              alt="Processed Video Feed"
+            />
+            <div class="video-controls" style="margin-top: 1rem;">
+                <button onclick="stopAnalysis()" class="btn btn-danger">Stop Analysis</button>
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- Live Camera View -->
+          <div id="live-view" class="video-container hidden">
+            <h2>Live Camera Feed</h2>
+            <img id="live-feed-img" src="" alt="Live Video Feed" />
+          </div>
+
+          <!-- Placeholder -->
+          <div
+            id="placeholder"
+            class="placeholder {% if filename %}hidden{% endif %}"
+          >
+            <p>Select a mode to begin surveillance analysis.</p>
+            <div class="supported-events">
+              <span>Fighting</span>
+              <span>Robbery</span>
+              <span>Burglary</span>
+              <span>Accidents</span>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>Powered by InceptionV3 + LSTM</p>
+      </footer>
+    </div>
+
+    <script>
+      let currentMode = '{{ "upload" if filename else "none" }}';
+      let alertInterval = null;
+      let lastSpeakTime = 0;
+
+      function setMode(mode) {
+          currentMode = mode;
+
+          // Buttons
+          document.getElementById('btn-upload-mode').classList.toggle('active', mode === 'upload');
+          document.getElementById('btn-live-mode').classList.toggle('active', mode === 'live');
+
+          // Sections
+          document.getElementById('upload-section').classList.toggle('hidden', mode !== 'upload');
+
+          const uploadedView = document.getElementById('uploaded-view');
+          const liveView = document.getElementById('live-view');
+          const placeholder = document.getElementById('placeholder');
+          const liveFeedImg = document.getElementById('live-feed-img');
+          const uploadedFeedImg = document.getElementById('uploaded-feed-img');
+
+          if (mode === 'live') {
+              if (uploadedFeedImg) uploadedFeedImg.src = ""; // Stop uploaded if running, but we might lose reference if we refresh page.
+              // Actually, simply setting src to empty string stops the request to the backend.
+              
+              uploadedView.classList.add('hidden');
+              liveView.classList.remove('hidden');
+              placeholder.classList.add('hidden');
+              // Set src to trigger stream
+              liveFeedImg.src = "{{ url_for('video_feed_live') }}";
+              startAlertPolling();
+          } else if (mode === 'upload') {
+              liveView.classList.add('hidden');
+              liveFeedImg.src = ""; // Stop stream
+
+              // If we have a filename from server rendering, show it, else placeholder
+              const hasFilename = {{ 'true' if filename else 'false' }};
+              if (hasFilename) {
+                  uploadedView.classList.remove('hidden');
+                  placeholder.classList.add('hidden');
+                  // Restart uploaded video if it was stopped
+                  if (uploadedFeedImg && uploadedFeedImg.getAttribute('data-original-src')) {
+                       uploadedFeedImg.src = uploadedFeedImg.getAttribute('data-original-src');
+                  }
+                  startAlertPolling();
+              } else {
+                  uploadedView.classList.add('hidden');
+                  placeholder.classList.remove('hidden');
+                  stopAlertPolling();
+              }
+          }
+      }
+      
+      function stopAnalysis() {
+             const uploadedView = document.getElementById('uploaded-view');
+             const placeholder = document.getElementById('placeholder');
+             const uploadedFeedImg = document.getElementById('uploaded-feed-img');
+             
+             if (uploadedFeedImg) {
+                 // Save original src to restore if needed (though reload usually required for restart)
+                 if (!uploadedFeedImg.getAttribute('data-original-src')) {
+                     uploadedFeedImg.setAttribute('data-original-src', uploadedFeedImg.src);
+                 }
+                 uploadedFeedImg.src = ""; // Cut connection
+             }
+             
+             uploadedView.classList.add('hidden');
+             placeholder.classList.remove('hidden');
+             stopAlertPolling();
+             
+             // Reset URL to avoid re-rendering on refresh
+             window.history.pushState({}, document.title, "/");
+      }
+
+      function startAlertPolling() {
+          if (alertInterval) clearInterval(alertInterval);
+          alertInterval = setInterval(checkStatus, 1000);
+      }
+
+      function stopAlertPolling() {
+          if (alertInterval) clearInterval(alertInterval);
+          resetAlerts();
+      }
+
+      function checkStatus() {
+          fetch('/status')
+              .then(response => response.json())
+              .then(data => {
+                  handleAlert(data.label, data.probability);
+              })
+              .catch(err => console.error(err));
+      }
+
+      function handleAlert(label, probability) {
+          const body = document.body;
+          const displaySection = document.getElementById('display-section');
+          const alertBanner = document.getElementById('alert-banner');
+          const alertText = document.getElementById('alert-text');
+
+          if (label !== 'Normal') {
+              body.classList.add('alert-active');
+              displaySection.classList.add('alert-active');
+              alertBanner.style.display = 'block';
+              alertText.textContent = `${label} detected! (${(probability * 100).toFixed(1)}%)`;
+
+              // Audio Alert (Throttle to once every 5 seconds)
+              const now = Date.now();
+              if (now - lastSpeakTime > 5000) {
+                  speakAlert(`Warning. ${label} detected.`);
+                  lastSpeakTime = now;
+              }
+          } else {
+              resetAlerts();
+          }
+      }
+
+      function resetAlerts() {
+          document.body.classList.remove('alert-active');
+          document.getElementById('display-section').classList.remove('alert-active');
+          document.getElementById('alert-banner').style.display = 'none';
+      }
+
+      function speakAlert(text) {
+          if ('speechSynthesis' in window) {
+              const utterance = new SpeechSynthesisUtterance(text);
+              utterance.rate = 1.0;
+              utterance.pitch = 1.0;
+              window.speechSynthesis.speak(utterance);
+          }
+      }
+
+      // Initialize based on server state
+      {% if filename %}
+          startAlertPolling();
+      {% endif %}
+    </script>
+  </body>
+</html>

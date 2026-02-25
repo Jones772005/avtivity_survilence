@@ -1,0 +1,114 @@
+================================================================================
+ANOMALOUS ACTIVITY DETECTION AND MONITORING USING MACHINE LEARNING
+================================================================================
+
+1. PROJECT CORE ARCHITECTURE
+----------------------------
+This system implements a state-of-the-art Video Action Recognition (VAR) pipeline. 
+Unlike standard image classification, this project handles the "Temporal 
+Dimension" by analyzing how spatial features change over a sequence of 32 frames.
+
+The architecture is a **Hybrid CNN-LSTM (Long-term Recurrent Convolutional 
+Network)**, optimized for edge-deployment using Intel OpenVINO.
+
+2. DETAILED TECHNOLOGY STACK
+----------------------------
+### Backend Infrastructure
+- **Core Engine**: Python 3.10+
+- **Deep Learning Framework**: TensorFlow 2.12.0 (Keras API)
+- **Inference Engine**: Intel OpenVINO Runtime (Core API)
+- **Concurrency**: Python `threading` with `Lock` primitives for model safety.
+
+### Computer Vision & Processing
+- **OpenCV (cv2)**: Video I/O, frame manipulation, and visualization overlays.
+- **NumPy**: High-performance tensor operations and sequence buffering.
+- **ImageIO**: Used during dataset preparation for robust video decoding.
+
+### Web Deployment
+- **Flask**: Micro-framework handling HTTP requests and MJPEG streaming.
+- **Multiplexing**: Real-time video streaming using `multipart/x-mixed-replace`.
+
+3. DATASET & PRE-PROCESSING PIPELINE
+------------------------------------
+### UCF-Crime Dataset
+The model is trained on the full UCF-Crime dataset, which focuses on 
+real-world surveillance anomalies.
+- **Classes**: Abuse, Arson, Assault, Burglary, Explosion, Fighting, Normal, 
+  RoadAccidents, Robbery, Shooting.
+- **Data Balance**: Downsampling was applied to the 'Normal' class to prevent 
+  majority-class bias during training.
+
+### Pre-processing Logic
+- **Frame Sampling**: Every 2nd frame is sampled (`counter % 2 == 0`) to reduce 
+  redundancy and improve throughput.
+- **Spatial Resolution**: Frames are resized to **299x224** using Inter-Area 
+  interpolation.
+- **Color Space**: BGR (OpenCV default) to RGB conversion is performed before 
+  inference.
+- **Normalization**: Pixel values are normalized for InceptionV3 compatibility.
+
+4. MODEL TRAINING FLOW (DEEP DIVE)
+----------------------------------
+### Stage 1: Spatial Feature Extraction (Encoder)
+- **Model**: InceptionV3 (Pre-trained on ImageNet).
+- **Optimization**: Converted to OpenVINO Intermediate Representation (IR) 
+  using `saved_model.xml` and `saved_model.bin`.
+- **Function**: Extracts a 2048-dimensional feature vector per frame.
+
+### Stage 2: Temporal Sequence Modeling (Decoder)
+- **Architecture**:
+  - **Input Layer**: (None, 32, 2048) - Sequence of 32 frame features.
+  - **LSTM Layer 1**: 256 units, `return_sequences=True` (captures fine-grained time steps).
+  - **LSTM Layer 2**: 128 units (compresses temporal context).
+  - **Dense Layer 1**: 32 units, ReLU activation.
+  - **Output Layer**: 10 units, Softmax activation.
+- **Optimization**: Adam Optimizer with Categorical Cross-Entropy Loss.
+- **Training Duration**: 100 Epochs (Checkpoint `classifier_lstm_e19.h5` used).
+
+5. FLUX / OPERATIONAL WORKFLOW
+------------------------------
+
+[ VIDEO SOURCE (MP4 / WebCam) ]
+            |
+            v
+[ OpenCV FRAME CAPTURE ] --- (Skip Every Other Frame) ---> [ QUEUE ]
+                                                              |
+                                                              v
+[ PRE-PROCESSING (299x224, RGB) ] <---------------------------|
+            |
+            | (Per Frame)
+            v
+[ OPENVINO ENCODER (InceptionV3) ] ----> [ BUFFER (Max Size: 32) ]
+            |
+            | (When Buffer Full)
+            v
+[ TENSORFLOW DECODER (LSTM) ] ---------> [ PROBABILITY MATRIX ]
+            |
+            |
+            v
+[ VISUALIZATION ENGINE ] --------------> [ FLASK WEB DASHBOARD ]
+(Text Overlays, Top-3, Inf Speed)
+
+
+6. REAL-TIME INFERENCE ARCHITECTURE
+-----------------------------------
+### Multiprocessing & Sync
+- The `AnomalyDetector` class uses a `threading.Lock()` to ensure that the 
+  InceptionV3 and LSTM models are not accessed by multiple requests 
+  simultaneously, preventing memory corruption.
+- **Buffering**: A sliding window approach or a fixed buffer is used to collect 
+  32 frames before triggering the LSTM classification.
+
+### Performance metrics
+- **Inference Time**: Real-time tracking of latency (typically 20-50ms per 
+  frame on CPU).
+- **Detection Counter**: Tracks the total number of classifications performed 
+  since the session started.
+
+7. HOW TO RUN
+-------------
+1. **Prepare Environment**: `pip install -r requirements.txt`
+2. **Launch Application**: `cd web_app && python app.py`
+3. **Monitor**: Open browser to `http://127.0.0.1:5000`
+4. **Action**: Upload video files to the `uploads/` directory for processing.
+================================================================================
